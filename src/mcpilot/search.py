@@ -3,7 +3,9 @@ Semantic search over the MCP server index + rationale generation.
 """
 
 import re
+import sys
 
+import numpy as np
 from sentence_transformers import SentenceTransformer
 
 from mcpilot.indexer import MODEL_NAME, get_connection
@@ -25,6 +27,34 @@ def _get_model() -> SentenceTransformer:
     return _model
 
 
+def _encode_query(model: SentenceTransformer, text: str) -> list[float]:
+    """
+    Encode query text. Chunks + mean-pools if over the model's token limit
+    so tail content isn't silently dropped by the 256-token cap.
+    """
+    chunk_size = model.max_seq_length - 2  # reserve 2 for [CLS] / [SEP]
+    tokens = model.tokenizer.encode(text, add_special_tokens=False)
+
+    if len(tokens) <= chunk_size:
+        return model.encode([text])[0].tolist()
+
+    print(
+        f"[mcpilot] Query is {len(tokens)} tokens (limit: {chunk_size}); "
+        "chunking and mean-pooling for full coverage.",
+        file=sys.stderr,
+    )
+    chunks = [
+        model.tokenizer.decode(tokens[i : i + chunk_size])
+        for i in range(0, len(tokens), chunk_size)
+    ]
+    embeddings = model.encode(chunks)
+    mean_emb = np.mean(embeddings, axis=0)
+    norm = np.linalg.norm(mean_emb)
+    if norm > 0:
+        mean_emb = mean_emb / norm
+    return mean_emb.tolist()
+
+
 def find_similar(
     query: str,
     top_k: int = 10,
@@ -36,10 +66,9 @@ def find_similar(
     Each result: {name, url, description, category, score}
     """
     model = _get_model()
-    query_emb = model.encode([query])[0].tolist()
+    query_emb = _encode_query(model, query)
 
     excluded_lower = {n.lower() for n in (exclude or [])}
-    fetch_limit = top_k + max(len(excluded_lower) * 3, 10)
 
     con = get_connection()
     rows = con.execute(
@@ -51,9 +80,8 @@ def find_similar(
         )
         WHERE score >= ?
         ORDER BY score DESC
-        LIMIT ?
         """,
-        [query_emb, min_score, fetch_limit],
+        [query_emb, min_score],
     ).fetchall()
     con.close()
 

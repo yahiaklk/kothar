@@ -1,14 +1,22 @@
 """
-Regression tests for indexer.py — parse_readme and _extract_description.
+Regression tests for indexer.py — parse_readme, _extract_description, is_index_ready,
+_load_local_registry.
 
 Covers fixes from:
   a68237b  _SECTION_RE restricted to ### only
   dd51e6c  strip HTML anchors from section headings, handle Glama badges
+  v0.2.0   is_index_ready opens read-only connection (duckdb-lock fix)
+  local-registry  MCPILOT_LOCAL_REGISTRY env var
 """
 
-import pytest
+import os
 
-from mcpilot.indexer import _extract_description, parse_readme
+import pytest
+import duckdb
+
+import mcpilot.indexer as indexer_mod
+
+from mcpilot.indexer import _extract_description, _load_local_registry, parse_readme
 
 
 # ---------------------------------------------------------------------------
@@ -163,3 +171,161 @@ class TestParseReadme:
         )
         servers = parse_readme(text)
         assert servers[0]["description"] == "Actual description"
+
+
+# ---------------------------------------------------------------------------
+# is_index_ready — read-only connection fix (v0.2.0)
+# ---------------------------------------------------------------------------
+
+def _seed_db(path, count: int = 1):
+    """Create a DB file with `count` dummy server rows."""
+    con = duckdb.connect(str(path))
+    con.execute("""
+        CREATE TABLE servers (
+            id INTEGER PRIMARY KEY,
+            name VARCHAR, description VARCHAR, url VARCHAR, category VARCHAR,
+            embedding FLOAT[384]
+        )
+    """)
+    zero = [0.0] * 384
+    for i in range(count):
+        con.execute(
+            "INSERT INTO servers VALUES (?, ?, ?, ?, ?, ?)",
+            [i, f"s{i}", f"desc{i}", f"https://x.com/{i}", "Cat", zero],
+        )
+    con.close()
+
+
+class TestIsIndexReady:
+    def test_returns_true_when_db_has_data(self, monkeypatch, tmp_path):
+        db = tmp_path / "test.db"
+        _seed_db(db)
+        monkeypatch.setattr(indexer_mod, "DB_PATH", db)
+        assert indexer_mod.is_index_ready() is True
+
+    def test_returns_false_when_db_missing(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(indexer_mod, "DB_PATH", tmp_path / "nonexistent.db")
+        assert indexer_mod.is_index_ready() is False
+
+    def test_returns_false_when_table_empty(self, monkeypatch, tmp_path):
+        db = tmp_path / "empty.db"
+        _seed_db(db, count=0)
+        monkeypatch.setattr(indexer_mod, "DB_PATH", db)
+        assert indexer_mod.is_index_ready() is False
+
+    def test_concurrent_read_only_connections_allowed(self, monkeypatch, tmp_path):
+        """is_index_ready must use read_only=True so it doesn't block other readers."""
+        db = tmp_path / "test.db"
+        _seed_db(db)
+        monkeypatch.setattr(indexer_mod, "DB_PATH", db)
+
+        # Another process may already hold a read-only connection; is_index_ready
+        # must not fail — two read-only connections to the same file are allowed.
+        concurrent_ro = duckdb.connect(str(db), read_only=True)
+        try:
+            assert indexer_mod.is_index_ready() is True
+        finally:
+            concurrent_ro.close()
+
+
+# ---------------------------------------------------------------------------
+# _load_local_registry — MCPILOT_LOCAL_REGISTRY env var
+# ---------------------------------------------------------------------------
+
+class TestLoadLocalRegistry:
+    def _write_yaml(self, path, content: str):
+        path.write_text(content)
+        return str(path)
+
+    def test_env_unset_returns_empty(self, monkeypatch):
+        monkeypatch.delenv("MCPILOT_LOCAL_REGISTRY", raising=False)
+        assert _load_local_registry() == []
+
+    def test_env_set_to_missing_file_returns_empty(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("MCPILOT_LOCAL_REGISTRY", str(tmp_path / "nonexistent.yaml"))
+        assert _load_local_registry() == []
+
+    def test_valid_yaml_returns_servers(self, monkeypatch, tmp_path):
+        p = self._write_yaml(tmp_path / "reg.yaml", """
+servers:
+  - name: my-private-mcp
+    description: Internal tool for X
+    url: https://internal.example.com
+    category: Internal
+""")
+        monkeypatch.setenv("MCPILOT_LOCAL_REGISTRY", p)
+        result = _load_local_registry()
+        assert len(result) == 1
+        assert result[0]["name"] == "my-private-mcp"
+        assert result[0]["description"] == "Internal tool for X"
+        assert result[0]["url"] == "https://internal.example.com"
+        assert result[0]["category"] == "Internal"
+
+    def test_missing_url_defaults_to_empty_string(self, monkeypatch, tmp_path):
+        p = self._write_yaml(tmp_path / "reg.yaml", """
+servers:
+  - name: no-url-server
+    description: A server with no URL
+""")
+        monkeypatch.setenv("MCPILOT_LOCAL_REGISTRY", p)
+        result = _load_local_registry()
+        assert result[0]["url"] == ""
+
+    def test_missing_category_defaults_to_local(self, monkeypatch, tmp_path):
+        p = self._write_yaml(tmp_path / "reg.yaml", """
+servers:
+  - name: s
+    description: d
+""")
+        monkeypatch.setenv("MCPILOT_LOCAL_REGISTRY", p)
+        assert _load_local_registry()[0]["category"] == "Local"
+
+    def test_entry_missing_name_skipped(self, monkeypatch, tmp_path):
+        p = self._write_yaml(tmp_path / "reg.yaml", """
+servers:
+  - description: no name here
+  - name: valid
+    description: valid entry
+""")
+        monkeypatch.setenv("MCPILOT_LOCAL_REGISTRY", p)
+        result = _load_local_registry()
+        assert len(result) == 1
+        assert result[0]["name"] == "valid"
+
+    def test_entry_missing_description_skipped(self, monkeypatch, tmp_path):
+        p = self._write_yaml(tmp_path / "reg.yaml", """
+servers:
+  - name: no-desc
+  - name: valid
+    description: has a description
+""")
+        monkeypatch.setenv("MCPILOT_LOCAL_REGISTRY", p)
+        result = _load_local_registry()
+        assert len(result) == 1
+        assert result[0]["name"] == "valid"
+
+    def test_malformed_yaml_returns_empty(self, monkeypatch, tmp_path):
+        p = tmp_path / "bad.yaml"
+        p.write_text("{{{{invalid yaml")
+        monkeypatch.setenv("MCPILOT_LOCAL_REGISTRY", str(p))
+        assert _load_local_registry() == []
+
+    def test_non_dict_root_returns_empty(self, monkeypatch, tmp_path):
+        p = self._write_yaml(tmp_path / "reg.yaml", "- just a list")
+        monkeypatch.setenv("MCPILOT_LOCAL_REGISTRY", p)
+        assert _load_local_registry() == []
+
+    def test_multiple_servers_all_returned(self, monkeypatch, tmp_path):
+        p = self._write_yaml(tmp_path / "reg.yaml", """
+servers:
+  - name: alpha
+    description: Alpha server
+  - name: beta
+    description: Beta server
+  - name: gamma
+    description: Gamma server
+""")
+        monkeypatch.setenv("MCPILOT_LOCAL_REGISTRY", p)
+        result = _load_local_registry()
+        assert len(result) == 3
+        assert [r["name"] for r in result] == ["alpha", "beta", "gamma"]

@@ -3,12 +3,14 @@ Parse awesome-mcp-servers README, embed descriptions, store in DuckDB.
 Run directly to (re)build the index: uv run python -m mcpilot.indexer
 """
 
+import os
 import re
 import sys
 from pathlib import Path
 
 import duckdb
 import requests
+import yaml
 from sentence_transformers import SentenceTransformer
 
 # Pinned to a specific commit for reproducible indexing. To update: fetch the
@@ -89,6 +91,53 @@ def parse_readme(text: str) -> list[dict]:
     return servers
 
 
+def _load_local_registry() -> list[dict]:
+    """
+    Load private server entries from MCPILOT_LOCAL_REGISTRY env var (path to YAML).
+    Returns [] silently if env var is unset, file is missing, or file is malformed.
+
+    Expected YAML format:
+        servers:
+          - name: my-server
+            description: What it does
+            url: https://...      # optional
+            category: Internal    # optional, defaults to "Local"
+    """
+    registry_path = os.environ.get("MCPILOT_LOCAL_REGISTRY")
+    if not registry_path:
+        return []
+    path = Path(registry_path)
+    if not path.exists():
+        return []
+    try:
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        if not isinstance(data, dict):
+            return []
+        raw_servers = data.get("servers", [])
+        if not isinstance(raw_servers, list):
+            return []
+        result = []
+        for entry in raw_servers:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name", "").strip()
+            description = entry.get("description", "").strip()
+            if not name or not description:
+                continue
+            result.append(
+                {
+                    "name": name,
+                    "description": description,
+                    "url": entry.get("url", "").strip(),
+                    "category": entry.get("category", "Local").strip() or "Local",
+                }
+            )
+        return result
+    except Exception:
+        return []
+
+
 def build_index(force: bool = False) -> int:
     """
     Download README, embed descriptions, store in DuckDB.
@@ -114,6 +163,11 @@ def build_index(force: bool = False) -> int:
     servers = parse_readme(resp.text)
     print(f"Parsed {len(servers)} servers.")
 
+    local_servers = _load_local_registry()
+    if local_servers:
+        print(f"Merging {len(local_servers)} servers from local registry.")
+        servers = servers + local_servers
+
     print(f"Loading embedding model '{MODEL_NAME}'...")
     model = SentenceTransformer(MODEL_NAME)
 
@@ -121,24 +175,31 @@ def build_index(force: bool = False) -> int:
     print("Embedding descriptions (this takes ~30s on first run)...")
     embeddings = model.encode(texts, show_progress_bar=True, batch_size=64)
 
-    con.execute("DROP TABLE IF EXISTS servers")
-    con.execute("""
-        CREATE TABLE servers (
-            id      INTEGER PRIMARY KEY,
-            name    VARCHAR,
-            description VARCHAR,
-            url     VARCHAR,
-            category VARCHAR,
-            embedding FLOAT[384]
-        )
-    """)
-
     rows = [
         (i, s["name"], s["description"], s["url"], s["category"], embeddings[i].tolist())
         for i, s in enumerate(servers)
     ]
-    con.executemany("INSERT INTO servers VALUES (?, ?, ?, ?, ?, ?)", rows)
-    con.close()
+
+    con.begin()
+    try:
+        con.execute("DROP TABLE IF EXISTS servers")
+        con.execute("""
+            CREATE TABLE servers (
+                id      INTEGER PRIMARY KEY,
+                name    VARCHAR,
+                description VARCHAR,
+                url     VARCHAR,
+                category VARCHAR,
+                embedding FLOAT[384]
+            )
+        """)
+        con.executemany("INSERT INTO servers VALUES (?, ?, ?, ?, ?, ?)", rows)
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
 
     print(f"Index built: {len(servers)} servers stored in {DB_PATH}")
     return len(servers)
@@ -152,7 +213,7 @@ def is_index_ready() -> bool:
     if not DB_PATH.exists():
         return False
     try:
-        con = duckdb.connect(str(DB_PATH))
+        con = duckdb.connect(str(DB_PATH), read_only=True)
         count = con.execute("SELECT COUNT(*) FROM servers").fetchone()[0]
         con.close()
         return count > 0

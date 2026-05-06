@@ -1,6 +1,6 @@
 [project]
 name = "mcpilot"
-version = "0.1.2"
+version = "0.2.0"
 description = "Context-aware MCP server advisor — recommends the right MCP servers for your project and explains why."
 readme = "README.md"
 requires-python = ">=3.12"
