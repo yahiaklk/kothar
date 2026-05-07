@@ -1,6 +1,6 @@
-# mcpilot
+# kothar
 
-Context-aware MCP server advisor — recommends the right MCP servers for your project and explains why.
+Context-aware capability advisor — recommends the right MCP servers, skills, and tools for your goal and explains why.
 
 ## Stack
 - Python 3.12, managed with uv
@@ -10,19 +10,29 @@ Context-aware MCP server advisor — recommends the right MCP servers for your p
 - No cloud infra — local only
 
 ## Project structure
-- `src/mcpilot/server.py` — FastMCP server, three tools: recommend_for_project, recommend_next, explain_why
-- `src/mcpilot/indexer.py` — parses awesome-mcp-servers README, embeds, stores in DuckDB
-- `src/mcpilot/search.py` — semantic search + template-based rationale generation
+- `src/kothar/server.py` — FastMCP server: recommend_for_project, recommend_next, recommend_for_goal, explain_why
+- `src/kothar/indexer.py` — parses awesome-mcp-servers README, embeds, stores in DuckDB
+- `src/kothar/search.py` — semantic search + template-based rationale generation
 - `data/mcp_servers.db` — DuckDB index (gitignored, rebuilt on first run)
-- `mcpilot_brief.md` — product brief and build plan
 
 ## Running
 ```bash
 uv sync
-uv run python -m mcpilot.indexer        # build index
-uv run python -m mcpilot.server         # run MCP server
-uv run python -m mcpilot.indexer --force # rebuild index
+uv run python -m kothar.indexer        # build index
+uv run python -m kothar.server         # run MCP server
+uv run python -m kothar.indexer --force # rebuild index
+```
+
+## Tests
+```bash
+uv run pytest           # 79 tests
+uv run ruff check src/ tests/
+```
+
+## Registration with Claude Code
+```bash
+claude mcp add -s user kothar -- uv run --directory ~/projects/kothar python -m kothar.server
 ```
 
 ## Status
-v0.1. Three core tools implemented. Parser extracts ~2000 servers from awesome-mcp-servers. Similarity computed in DuckDB via `array_cosine_similarity`. 38 regression tests in `tests/`.
+v0.3 — 4 tools: recommend_for_project, recommend_next, recommend_for_goal, explain_why. 79 tests passing. Renamed from mcpilot.

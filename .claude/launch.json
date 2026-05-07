@@ -2,15 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "mcpilot",
+      "name": "kothar",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "python", "-m", "mcpilot.server"],
+      "runtimeArgs": ["run", "python", "-m", "kothar.server"],
       "port": 8000
     },
     {
-      "name": "mcpilot-indexer",
+      "name": "kothar-indexer",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "python", "-m", "mcpilot.indexer"],
+      "runtimeArgs": ["run", "python", "-m", "kothar.indexer"],
       "port": null
     }
   ]

@@ -1,6 +1,6 @@
-# mcpilot
+# kothar
 
-[![mcpilot MCP server](https://glama.ai/mcp/servers/yahiaklk/mcpilot/badges/card.svg)](https://glama.ai/mcp/servers/yahiaklk/mcpilot)
+[![kothar MCP server](https://glama.ai/mcp/servers/yahiaklk/kothar/badges/card.svg)](https://glama.ai/mcp/servers/yahiaklk/kothar)
 
 Context-aware MCP server advisor. Tells you what to install for your specific project — and why.
 
@@ -10,7 +10,7 @@ Context-aware MCP server advisor. Tells you what to install for your specific pr
 
 LLMs asked directly hallucinate servers that don't exist and recommend from stale training data. Directories give you search, not advice.
 
-mcpilot fills the **selection under context** gap: not "here are 19,000 options" but "for your specific project, right now, here's what you need and why."
+kothar fills the **selection under context** gap: not "here are 19,000 options" but "for your specific project, right now, here's what you need and why."
 
 ## The two moments nobody is serving
 
@@ -39,20 +39,20 @@ explain_why(server_name, project_description)
 
 ```bash
 git clone https://github.com/yahiaklk/mcpilot
-cd mcpilot
+cd kothar
 uv sync
 ```
 
 Build the index (first run, ~30s):
 
 ```bash
-uv run python -m mcpilot.indexer
+uv run python -m kothar.indexer
 ```
 
 ## Add to Claude Code
 
 ```bash
-claude mcp add --scope user mcpilot -- uv run --directory /path/to/mcpilot python -m mcpilot.server
+claude mcp add --scope user kothar -- uv run --directory /path/to/kothar python -m kothar.server
 ```
 
 ## Add to Claude Desktop
@@ -62,9 +62,9 @@ Add to your `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "mcpilot": {
+    "kothar": {
       "command": "uv",
-      "args": ["run", "--directory", "/path/to/mcpilot", "python", "-m", "mcpilot.server"]
+      "args": ["run", "--directory", "/path/to/kothar", "python", "-m", "kothar.server"]
     }
   }
 }
@@ -92,7 +92,7 @@ explain_why("postgres", "multi-tenant SaaS with row-level security")
 ## Rebuild the index
 
 ```bash
-uv run python -m mcpilot.indexer --force
+uv run python -m kothar.indexer --force
 ```
 
 ## Docker
@@ -100,8 +100,8 @@ uv run python -m mcpilot.indexer --force
 Multi-stage image with the embedding model + DuckDB index baked in — no runtime network dependency.
 
 ```bash
-docker build -t mcpilot:0.1.0 .
-docker run --rm -i mcpilot:0.1.0   # stdio transport, for local MCP clients
+docker build -t kothar:0.3.0 .
+docker run --rm -i kothar:0.3.0   # stdio transport, for local MCP clients
 ```
 
 Wire into Claude Desktop:
@@ -109,9 +109,9 @@ Wire into Claude Desktop:
 ```json
 {
   "mcpServers": {
-    "mcpilot": {
+    "kothar": {
       "command": "docker",
-      "args": ["run", "--rm", "-i", "mcpilot:0.1.0"]
+      "args": ["run", "--rm", "-i", "kothar:0.3.0"]
     }
   }
 }
