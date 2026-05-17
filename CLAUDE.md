@@ -10,7 +10,7 @@ Context-aware capability advisor — recommends the right MCP servers, skills, a
 - No cloud infra — local only
 
 ## Project structure
-- `src/kothar/server.py` — FastMCP server: recommend_for_project, recommend_next, recommend_for_goal, explain_why
+- `src/kothar/server.py` — FastMCP server: recommend_for_project, recommend_for_next_step, recommend_for_goal, explain_fit
 - `src/kothar/indexer.py` — parses awesome-mcp-servers README, embeds, stores in DuckDB
 - `src/kothar/search.py` — semantic search + template-based rationale generation
 - `data/mcp_servers.db` — DuckDB index (gitignored, rebuilt on first run)
@@ -34,5 +34,9 @@ uv run ruff check src/ tests/
 claude mcp add -s user kothar -- uv run --directory ~/projects/kothar python -m kothar.server
 ```
 
+## Environment variables
+- `VAULT_PATH` — allowed base directory for `session_file` in `recommend_for_next_step` (default: `~/projects`)
+- `KOTHAR_LOCAL_REGISTRY` — path to a YAML file of private server entries merged into the index at build time
+
 ## Status
-v0.3 — 4 tools: recommend_for_project, recommend_next, recommend_for_goal, explain_why. 79 tests passing. Renamed from mcpilot.
+v0.4 — 4 tools: recommend_for_project, recommend_for_next_step, recommend_for_goal, explain_fit. 80 tests passing.

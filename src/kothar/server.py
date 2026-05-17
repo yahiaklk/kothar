@@ -3,16 +3,18 @@ kothar — context-aware capability advisor.
 
 Four tools:
   recommend_for_project  — initial stack recommendation for a new project
-  recommend_next         — mid-project: what to add as needs evolve
-  explain_why            — why a specific server fits your project
+  recommend_for_next_step — mid-project: what to add as needs evolve
+  explain_fit             — why a specific server fits your project
   recommend_for_goal     — decompose a multi-part goal into sub-queries and recommend per part
 
 Run with: uv run python -m kothar.server
 """
 
+import os
 import re
 import sys
 import traceback
+from pathlib import Path
 
 from fastmcp import FastMCP
 
@@ -75,7 +77,7 @@ def recommend_for_project(description: str) -> str:
 
 
 @mcp.tool()
-def recommend_next(
+def recommend_for_next_step(
     current_stack: list[str],
     new_context: str,
     session_file: str | None = None,
@@ -92,8 +94,15 @@ def recommend_next(
 
         context = new_context
         if session_file:
+            allowed = Path(os.environ.get("VAULT_PATH", "~/projects")).expanduser().resolve()
+            p = Path(session_file).resolve()
+            if not p.is_relative_to(allowed):
+                return (
+                    f"## Error\n\n"
+                    f"session_file must be under {allowed}"
+                )
             try:
-                with open(session_file) as f:
+                with open(p) as f:
                     session_content = f.read().strip()
                 if session_content:
                     context = f"{new_context}\n\n{session_content}"
@@ -117,7 +126,7 @@ def recommend_next(
 
 
 @mcp.tool()
-def explain_why(server_name: str, project_description: str) -> str:
+def explain_fit(server_name: str, project_description: str) -> str:
     """
     Explain why a specific MCP server is a good fit for a given project.
     Example: server_name="github", project_description="open source Python library with CI/CD"
